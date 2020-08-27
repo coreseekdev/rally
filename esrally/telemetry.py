@@ -961,7 +961,7 @@ class DiskIo(InternalTelemetryDevice):
         if process_start:
             self.read_bytes = process_start.read_bytes
             self.write_bytes = process_start.write_bytes
-            self.logger.info("Using more accurate process-based I/O counters.")
+            self.logger.info("Using more accurate process-based I/O counters.[r={}, w={}]".format(self.read_bytes, self.write_bytes))
         else:
             # noinspection PyBroadException
             try:
