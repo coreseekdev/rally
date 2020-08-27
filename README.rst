@@ -3,6 +3,15 @@ Rally
 
 Rally is the macrobenchmarking framework for Elasticsearch
 
+And also used for ManticoreSearch / Coreseek / Sphinx, with the following improvements.
+
+* IO stats
+* Memory stats
+* Integrated with Prometheus & Grafana
+
+process-exporter -config.path etc/pexport.yml
+docker run -d -p 3000:3000 --name grafana grafana/grafana:7.1.5
+
 What is Rally?
 --------------
 

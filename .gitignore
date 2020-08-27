@@ -118,3 +118,6 @@ recipes/ccr/ccr-target-hosts.json
 
 # Tracker tracks
 tracks/
+
+# Grafana
+.vis
