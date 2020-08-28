@@ -1,5 +1,7 @@
 # TODO
 
+- [ ] 为 `--distribution-version` 提供选项 `manticore`， 处理为 manticore 的测试分支
+
 1. mechanic/launcher 需要调整为启动 searchd
 2. "operation-type: 
         create-index
