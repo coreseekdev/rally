@@ -138,11 +138,15 @@ def team_path(cfg):
         root = cfg.opts("node", "root.dir")
         team_repositories = cfg.opts("mechanic", "team.repository.dir")
         teams_dir = os.path.join(root, team_repositories)
-
         current_team_repo = repo.RallyRepository(remote_url, teams_dir, repo_name, "teams", offline)
         if repo_revision:
             current_team_repo.checkout(repo_revision)
         else:
+            """
+                FIXME: 此处对 manticore 进行 hardcode 的处理，并强制指定es版本。
+            """
+            if distribution_version.endswith("-manticore"):
+                distribution_version = "7.9.0"  # current lastest version.
             current_team_repo.update(distribution_version)
             cfg.add(config.Scope.applicationOverride, "mechanic", "repository.revision", current_team_repo.revision)
         return current_team_repo.repo_dir

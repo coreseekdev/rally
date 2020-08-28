@@ -41,6 +41,7 @@ def create(cfg, sources, distribution, build, car, plugins=None):
     supply_requirements = _supply_requirements(sources, distribution, build, plugins, revisions, distribution_version)
     build_needed = any([build for _, _, build in supply_requirements.values()])
     es_supplier_type, es_version, es_build = supply_requirements["elasticsearch"]
+    
     src_config = cfg.all_opts("source")
     suppliers = []
 
@@ -100,6 +101,14 @@ def create(cfg, sources, distribution, build, car, plugins=None):
 
         suppliers.append(source_supplier)
         repo = None
+    elif es_supplier_type == "manticore-distribution":
+        es_src_dir = None
+        dist_cfg1 = dist_cfg.copy()
+        dist_cfg1['release.url'] = "https://artifacts.elastic.co/downloads/elasticsearch/release-{{VERSION}}-{{OSNAME}}-{{ARCH}}.tar.gz"
+        repo = DistributionRepository(name=cfg.opts("mechanic", "distribution.repository"),
+                                      distribution_config=dist_cfg1,
+                                      template_renderer=template_renderer)
+        suppliers.append(ManticoreDistributionSupplier(repo, es_version, distributions_root))
     else:
         es_src_dir = None
         repo = DistributionRepository(name=cfg.opts("mechanic", "distribution.repository"),
@@ -163,8 +172,12 @@ def _supply_requirements(sources, distribution, build, plugins, revisions, distr
     if "elasticsearch" in revisions and sources:
         supply_requirements["elasticsearch"] = ("source", _required_revision(revisions, "elasticsearch", "Elasticsearch"), build)
     else:
-        # no revision given or explicitly specified that it's from a distribution -> must use a distribution
-        supply_requirements["elasticsearch"] = ("distribution", _required_version(distribution_version), False)
+        # check is manticore
+        if distribution_version.endswith("-manticore"):
+            supply_requirements["elasticsearch"] = ("manticore-distribution", _required_version(distribution_version), False)
+        else:
+            # no revision given or explicitly specified that it's from a distribution -> must use a distribution
+            supply_requirements["elasticsearch"] = ("distribution", _required_version(distribution_version), False)
 
     for plugin in plugins:
         if plugin.core_plugin:
@@ -535,6 +548,37 @@ class ElasticsearchDistributionSupplier:
     def add(self, binaries):
         binaries["elasticsearch"] = self.distribution_path
 
+class ManticoreDistributionSupplier:
+    def __init__(self, repo, version, distributions_root):
+        self.repo = repo
+        self.version = version
+        self.distributions_root = distributions_root
+        # will be defined in the prepare phase
+        self.distribution_path = None
+        self.logger = logging.getLogger(__name__)
+
+    def fetch(self):
+        """
+            需要预置二进制代码，无需检索。
+        """
+        io.ensure_dir(self.distributions_root)
+        download_url = self.repo.download_url
+        distribution_path = os.path.join(self.distributions_root, self.repo.file_name)
+        self.logger.info("Resolved download URL [%s] for version [%s]", download_url, self.version)
+        if not os.path.isfile(distribution_path) or not self.repo.cache:
+            self.logger.error("Cannot found Manticore distribution for version [%s].", self.version)
+            raise exceptions.SystemSetupError("Cannot found Manticore distribution from [%s]. Please check that the specified "
+                                                  "version [%s] is correct." % (distribution_path, self.version))
+        else:
+            self.logger.info("Skipping download for version [%s]. Found an existing binary at [%s].", self.version, distribution_path)
+
+        self.distribution_path = distribution_path
+
+    def prepare(self):
+        pass
+
+    def add(self, binaries):
+        binaries["manticore"] = self.distribution_path
 
 class PluginDistributionSupplier:
     def __init__(self, repo, plugin):

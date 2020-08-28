@@ -56,6 +56,7 @@ class RallyRepository:
                                                       .format(src=self.repo_dir))
 
     def update(self, distribution_version):
+        # import pdb;pdb.set_trace()
         try:
             if self.remote:
                 branch = versions.best_match(git.branches(self.repo_dir, remote=self.remote), distribution_version)
