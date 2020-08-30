@@ -37,10 +37,13 @@ def local(cfg, car, plugins, cluster_settings, ip, http_port, all_node_ips, all_
     runtime_jdk = car.mandatory_var("runtime.jdk")
     _, java_home = java_resolver.java_home(runtime_jdk, cfg.opts("mechanic", "runtime.jdk"), runtime_jdk_bundled)
 
+
     es_installer = ElasticsearchInstaller(car, java_home, node_name, node_root_dir, all_node_ips, all_node_names, ip, http_port)
     plugin_installers = [PluginInstaller(plugin, java_home) for plugin in plugins]
 
-    return BareProvisioner(cluster_settings, es_installer, plugin_installers, distribution_version=distribution_version)
+    mc_installer = ManticoreInstaller(car, java_home, node_name, node_root_dir, all_node_ips, all_node_names, ip, http_port)
+
+    return BareProvisioner(cluster_settings, mc_installer, es_installer, plugin_installers, distribution_version=distribution_version)
 
 
 def docker(cfg, car, cluster_settings, ip, http_port, target_root, node_name):
@@ -160,6 +163,34 @@ def _apply_config(source_root_path, target_root_path, config_vars):
                 logger.info("Treating [%s] as binary and copying as is to [%s].", source_file, target_file)
                 shutil.copy(source_file, target_file)
 
+def _mc_apply_config(source_root_path, target_root_path, config_vars):
+    """
+        暂时不考虑额外的配置，固定好配置
+    """
+    config_ctx_template = """searchd
+{
+    listen = 127.0.0.1:9312
+    listen = 127.0.0.1:9306:mysql
+    listen = 127.0.0.1:9308:http
+    mysql_version_string = 5.0.37
+    docstore_cache_size = 32m
+
+    log = {{ log_path }}/searchd.log
+    query_log = {{ log_path }}/query.log
+    pid_file =  {{ install_root_path }}/pid
+    data_dir = {{ data_paths[0] }}
+    query_log_format = sphinxql
+}
+"""
+    template = jinja2.Template(config_ctx_template)
+    target_config_file = os.path.join(target_root_path, "manticore.conf")
+    with open(target_config_file, mode="w", encoding="utf-8") as f:
+        f.write(template.render(config_vars))
+    try:
+        io.ensure_dir(config_vars['data_paths'][0])
+    finally:
+        pass
+    mounts = {}
 
 class BareProvisioner:
     """
@@ -167,18 +198,32 @@ class BareProvisioner:
     of the benchmark candidate to the appropriate place.
     """
 
-    def __init__(self, cluster_settings, es_installer, plugin_installers, distribution_version=None, apply_config=_apply_config):
+    def __init__(self, cluster_settings, mc_installer, es_installer, plugin_installers, distribution_version=None, apply_config=_apply_config):
         self._cluster_settings = cluster_settings
         self.es_installer = es_installer
+        self.mc_installer = mc_installer
         self.plugin_installers = plugin_installers
         self.distribution_version = distribution_version
         self.apply_config = apply_config
         self.logger = logging.getLogger(__name__)
 
     def prepare(self, binary):
-        self.es_installer.install(binary["elasticsearch"])
-        # we need to immediately delete it as plugins may copy their configuration during installation.
-        self.es_installer.delete_pre_bundled_configuration()
+        # print(binary, self.es_installer, self.plugin_installers)
+        """
+        - 此处暂时与 elasticsearch 复用目录管理的逻辑
+        """
+        bIsManticore = "manticore" in binary
+        if bIsManticore:
+            self.mc_installer.install(binary["manticore"])
+            self.mc_installer.delete_pre_bundled_configuration()
+            # alias mc as es
+            self.es_installer = self.mc_installer
+            if self.apply_config == _apply_config:
+                self.apply_config = _mc_apply_config
+        else:
+            self.es_installer.install(binary["elasticsearch"])
+            # we need to immediately delete it as plugins may copy their configuration during installation.
+            self.es_installer.delete_pre_bundled_configuration()
 
         # determine after installation because some variables will depend on the install directory
         target_root_path = self.es_installer.es_home_path
@@ -325,6 +370,95 @@ class ElasticsearchInstaller:
         else:
             return [os.path.join(self.es_home_path, "data")]
 
+class ManticoreInstaller:
+    def __init__(self, car, java_home, node_name, node_root_dir, all_node_ips, all_node_names, ip, http_port,
+                 hook_handler_class=team.BootstrapHookHandler):
+        self.car = car
+        self.java_home = java_home
+        self.node_name = node_name
+        self.node_root_dir = node_root_dir
+        self.install_dir = os.path.join(node_root_dir, "install")
+        self.node_log_dir = os.path.join(node_root_dir, "logs", "server")
+        self.heap_dump_dir = os.path.join(node_root_dir, "heapdump")
+        self.all_node_ips = all_node_ips
+        self.all_node_names = all_node_names
+        self.node_ip = ip
+        self.http_port = http_port
+        self.hook_handler = hook_handler_class(self.car)
+        if self.hook_handler.can_load():
+            self.hook_handler.load()
+        self.es_home_path = None
+        self.data_paths = None
+        self.logger = logging.getLogger(__name__)
+
+    def install(self, binary):
+        self.logger.info("Preparing candidate locally in [%s].", self.install_dir)
+        io.ensure_dir(self.install_dir)
+        io.ensure_dir(self.node_log_dir)
+        io.ensure_dir(self.heap_dump_dir)
+
+        self.logger.info("Unzipping %s to %s", binary, self.install_dir)
+        io.decompress(binary, self.install_dir)
+        
+        self.es_home_path = glob.glob(os.path.join(self.install_dir, "manticore*"))[0]
+        self.data_paths = self._data_paths()
+
+    def delete_pre_bundled_configuration(self):
+        config_path = os.path.join(self.es_home_path, "config")
+        self.logger.info("Deleting pre-bundled Elasticsearch configuration at [%s]", config_path)
+        shutil.rmtree(config_path, ignore_errors=True)
+
+    def invoke_install_hook(self, phase, variables):
+        env = {}
+        if self.java_home:
+            env["JAVA_HOME"] = self.java_home
+        self.hook_handler.invoke(phase.name, variables=variables, env=env)
+
+    @property
+    def variables(self):
+        # bind as specifically as possible
+        network_host = self.node_ip
+
+        defaults = {
+            "cluster_name": "rally-benchmark",
+            "node_name": self.node_name,
+            "data_paths": self.data_paths,
+            "log_path": self.node_log_dir,
+            "heap_dump_path": self.heap_dump_dir,
+            # this is the node's IP address as specified by the user when invoking Rally
+            "node_ip": self.node_ip,
+            # this is the IP address that the node will be bound to. Rally will bind to the node's IP address (but not to 0.0.0.0). The
+            # reason is that we use the node's IP address as subject alternative name in x-pack.
+            "network_host": network_host,
+            "http_port": str(self.http_port),
+            "transport_port": str(self.http_port + 100),
+            "all_node_ips": "[\"%s\"]" % "\",\"".join(self.all_node_ips),
+            "all_node_names": "[\"%s\"]" % "\",\"".join(self.all_node_names),
+            # at the moment we are strict and enforce that all nodes are master eligible nodes
+            "minimum_master_nodes": len(self.all_node_ips),
+            "install_root_path": self.es_home_path
+        }
+        variables = {}
+        variables.update(self.car.variables)
+        variables.update(defaults)
+        return variables
+
+    @property
+    def config_source_paths(self):
+        return self.car.config_paths
+
+    def _data_paths(self):
+        if "data_paths" in self.car.variables:
+            data_paths = self.car.variables["data_paths"]
+            if isinstance(data_paths, str):
+                return [data_paths]
+            elif isinstance(data_paths, list):
+                return data_paths
+            else:
+                raise exceptions.SystemSetupError("Expected [data_paths] to be either a string or a list but was [%s]." % type(data_paths))
+        else:
+            return [os.path.join(self.install_dir, "data")]
+
 
 class PluginInstaller:
     def __init__(self, plugin, java_home, hook_handler_class=team.BootstrapHookHandler):
@@ -434,7 +568,6 @@ class DockerProvisioner:
             io.ensure_dir(self.data_paths[0])
         finally:
             os.umask(previous_umask)
-
         mounts = {}
 
         for car_config_path in self.car.config_paths:

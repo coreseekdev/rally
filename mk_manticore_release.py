@@ -21,6 +21,6 @@ tar = tarfile.open(fname,"w:gz")
 
 for f in ['indexer', 'indextool', 'searchd', 'spelldump', 'wordbreaker']:
     full_f = os.path.join(fpath, 'src',f)
-    tar.add(full_f, os.path.join('bin', f))
+    tar.add(full_f, os.path.join('manticore-{}'.format(tagged_version),'bin', f))
 
 tar.close()

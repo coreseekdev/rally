@@ -156,12 +156,16 @@ class ProcessLauncher:
             telemetry.IndexSize(data_paths),
             telemetry.StartupTime(),
         ]
+        distribution_version = self.cfg.opts("mechanic", "distribution.version", mandatory=False)
 
         t = telemetry.Telemetry(enabled_devices, devices=node_telemetry)
         # TODO #822: Remove reference to car's environment
         env = self._prepare_env(node_configuration.car_env, node_name, java_home, t)
         t.on_pre_node_start(node_name)
-        node_pid = self._start_process(binary_path, env)
+        if distribution_version.endswith("-manticore"):
+            node_pid = self._start_mc_process(binary_path, env)
+        else:
+            node_pid = self._start_process(binary_path, env)
         self.logger.info("Successfully started node [%s] with PID [%s].", node_name, node_pid)
         node = cluster.Node(node_pid, binary_path, host_name, node_name, t)
 
@@ -208,7 +212,7 @@ class ProcessLauncher:
             # wait for it to finish
             command_line_process.wait()
         return command_line_process.returncode
-
+    
     @staticmethod
     def _start_process(binary_path, env):
         if os.name == "posix" and os.geteuid() == 0:
@@ -216,6 +220,24 @@ class ProcessLauncher:
         os.chdir(binary_path)
         cmd = [io.escape_path(os.path.join(".", "bin", "elasticsearch"))]
         cmd.extend(["-d", "-p", "pid"])
+        print("exec", cmd, env)
+        ret = ProcessLauncher._run_subprocess(command_line=" ".join(cmd), env=env)
+        if ret != 0:
+            msg = "Daemon startup failed with exit code [{}]".format(ret)
+            logging.error(msg)
+            raise exceptions.LaunchError(msg)
+
+        return wait_for_pidfile(io.escape_path(os.path.join(".", "pid")))
+
+    @staticmethod
+    def _start_mc_process(binary_path, env):
+        if os.name == "posix" and os.geteuid() == 0:
+            raise exceptions.LaunchError("Cannot launch Elasticsearch as root. Please run Rally as a non-root user.")
+        os.chdir(binary_path)
+        #print(binary_path, io.escape_path(os.path.join(".", "pid")))
+        cmd = [io.escape_path(os.path.join(".", "bin", "searchd"))]
+        cmd.extend(["-c", "manticore.conf",])
+        #print("exec", cmd, env)
         ret = ProcessLauncher._run_subprocess(command_line=" ".join(cmd), env=env)
         if ret != 0:
             msg = "Daemon startup failed with exit code [{}]".format(ret)
