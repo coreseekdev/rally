@@ -213,7 +213,11 @@ class DriverActor(actor.RallyActor):
     @actor.no_retry("driver")
     def receiveMsg_PrepareBenchmark(self, msg, sender):
         self.start_sender = sender
-        self.coordinator = Driver(self, msg.config)
+        distribution_version = msg.config.opts("mechanic", "distribution.version", mandatory=False)
+        if distribution_version.endswith("-manticore"):
+            self.coordinator = Driver(self, msg.config, es_client_factory_class=client.ManticoreClientFactory)
+        else:
+            self.coordinator = Driver(self, msg.config)
         self.coordinator.prepare_benchmark(msg.track)
 
     @actor.no_retry("driver")
@@ -391,22 +395,31 @@ class Driver:
         log_root = paths.race_root(self.config)
 
         es_default = es["default"]
-        self.telemetry = telemetry.Telemetry(enabled_devices, devices=[
-            telemetry.NodeStats(telemetry_params, es, self.metrics_store),
-            telemetry.ExternalEnvironmentInfo(es_default, self.metrics_store),
-            telemetry.ClusterEnvironmentInfo(es_default, self.metrics_store),
-            telemetry.JvmStatsSummary(es_default, self.metrics_store),
-            telemetry.IndexStats(es_default, self.metrics_store),
-            telemetry.MlBucketProcessingTime(es_default, self.metrics_store),
-            telemetry.SegmentStats(log_root, es_default),
-            telemetry.CcrStats(telemetry_params, es, self.metrics_store),
-            telemetry.RecoveryStats(telemetry_params, es, self.metrics_store),
-            telemetry.TransformStats(telemetry_params, es, self.metrics_store)
-        ])
+        if self.es_client_factory != client.EsClientFactory:
+            self.telemetry = telemetry.Telemetry(enabled_devices, devices=[
+                telemetry.NodeStats(telemetry_params, es, self.metrics_store),
+                telemetry.IndexStats(es_default, self.metrics_store),
+                telemetry.CcrStats(telemetry_params, es, self.metrics_store),
+                telemetry.RecoveryStats(telemetry_params, es, self.metrics_store),
+                telemetry.TransformStats(telemetry_params, es, self.metrics_store)
+            ])
+        else:
+            self.telemetry = telemetry.Telemetry(enabled_devices, devices=[
+                telemetry.NodeStats(telemetry_params, es, self.metrics_store),
+                telemetry.ExternalEnvironmentInfo(es_default, self.metrics_store),
+                telemetry.ClusterEnvironmentInfo(es_default, self.metrics_store),
+                telemetry.JvmStatsSummary(es_default, self.metrics_store),
+                telemetry.IndexStats(es_default, self.metrics_store),
+                telemetry.MlBucketProcessingTime(es_default, self.metrics_store),
+                telemetry.SegmentStats(log_root, es_default),
+                telemetry.CcrStats(telemetry_params, es, self.metrics_store),
+                telemetry.RecoveryStats(telemetry_params, es, self.metrics_store),
+                telemetry.TransformStats(telemetry_params, es, self.metrics_store)
+            ])
 
     def wait_for_rest_api(self, es):
         skip_rest_api_check = self.config.opts("mechanic", "skip.rest.api.check")
-        if skip_rest_api_check:
+        if skip_rest_api_check or self.es_client_factory != client.EsClientFactory:
             self.logger.info("Skipping REST API check.")
         else:
             es_default = es["default"]
@@ -1218,11 +1231,22 @@ class AsyncIoAdapter:
             for cluster_name, cluster_hosts in all_hosts.items():
                 es[cluster_name] = client.EsClientFactory(cluster_hosts, all_client_options[cluster_name]).create_async()
             return es
+        
+        def mc_clients(all_hosts, all_client_options):
+            es = {}
+            for cluster_name, cluster_hosts in all_hosts.items():
+                es[cluster_name] = client.ManticoreClientFactory(cluster_hosts, all_client_options[cluster_name]).create_async()
+            return es
 
+        distribution_version = self.cfg.opts("mechanic", "distribution.version", mandatory=False)
         # Properly size the internal connection pool to match the number of expected clients but allow the user
         # to override it if needed.
         client_count = len(self.task_allocations)
-        es = es_clients(self.cfg.opts("client", "hosts").all_hosts,
+        if distribution_version.endswith("-manticore"):
+            es = mc_clients(self.cfg.opts("client", "hosts").all_hosts,
+                        self.cfg.opts("client", "options").with_max_connections(client_count))
+        else:
+            es = es_clients(self.cfg.opts("client", "hosts").all_hosts,
                         self.cfg.opts("client", "options").with_max_connections(client_count))
 
         aws = []

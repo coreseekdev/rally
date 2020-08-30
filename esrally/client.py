@@ -222,3 +222,99 @@ def wait_for_rest_layer(es, max_attempts=40):
                 logger.warning("Got unexpected status code [%s] on attempt [%s].", e.status_code, attempt)
                 raise e
     return False
+
+class ManticoreClientFactory:
+    """
+    Abstracts how the Manticore client is created. Intended for testing.
+    """
+    def __init__(self, hosts, client_options):
+        self.hosts = hosts
+        self.client_options = dict(client_options)
+        self.ssl_context = None
+        self.logger = logging.getLogger(__name__)
+
+        masked_client_options = dict(client_options)
+        if "basic_auth_password" in masked_client_options:
+            masked_client_options["basic_auth_password"] = "*****"
+        if "http_auth" in masked_client_options:
+            masked_client_options["http_auth"] = (masked_client_options["http_auth"][0], "*****")
+        self.logger.info("Creating ES client connected to %s with options [%s]", hosts, masked_client_options)
+
+    def _is_set(self, client_opts, k):
+        try:
+            return client_opts[k]
+        except KeyError:
+            return False
+
+    def create(self):
+        import MySQLdb
+        host = self.hosts[0]['host']
+        return MySQLdb.connect(host=host, port=9306)
+
+    def create_async(self):
+        import asyncio
+        import aiomysql
+        import MySQLdb
+
+        
+        # 在 ES 的版本中，对 request 进行了追踪。
+        # 目前暂时无法处理 aiomysql 的 req & res.
+        # 暂时不处理 asyncio
+        #conn = await aiomysql.connect(host=self.hosts[0], loop= asyncio.get_running_loop())
+        #return conn
+        host = self.hosts[0]['host']
+        return MySQLdb.connect(host=host, port=9306)
+
+        """
+        import elasticsearch
+        import esrally.async_connection
+        import io
+        import aiohttp
+
+        from elasticsearch.serializer import JSONSerializer
+
+        class LazyJSONSerializer(JSONSerializer):
+            def loads(self, s):
+                meta = RallyAsyncElasticsearch.request_context.get()
+                if "raw_response" in meta:
+                    return io.BytesIO(s)
+                else:
+                    return super().loads(s)
+
+        async def on_request_start(session, trace_config_ctx, params):
+            meta = RallyAsyncElasticsearch.request_context.get()
+            # this can happen if multiple requests are sent on the wire for one logical request (e.g. scrolls)
+            if "request_start" not in meta:
+                meta["request_start"] = time.perf_counter()
+
+        async def on_request_end(session, trace_config_ctx, params):
+            meta = RallyAsyncElasticsearch.request_context.get()
+            meta["request_end"] = time.perf_counter()
+
+        trace_config = aiohttp.TraceConfig()
+        trace_config.on_request_start.append(on_request_start)
+        trace_config.on_request_end.append(on_request_end)
+        # ensure that we also stop the timer when a request "ends" with an exception (e.g. a timeout)
+        trace_config.on_request_exception.append(on_request_end)
+
+        # override the builtin JSON serializer
+        self.client_options["serializer"] = LazyJSONSerializer()
+        self.client_options["trace_config"] = trace_config
+
+        class RallyAsyncElasticsearch(elasticsearch.AsyncElasticsearch):
+            request_context = contextvars.ContextVar("rally_request_context")
+
+            def init_request_context(self):
+                ctx = {}
+                RallyAsyncElasticsearch.request_context.set(ctx)
+                return ctx
+
+            def return_raw_response(self):
+                ctx = RallyAsyncElasticsearch.request_context.get()
+                ctx["raw_response"] = True
+
+        return RallyAsyncElasticsearch(hosts=self.hosts,
+                                       connection_class=esrally.async_connection.AIOHttpConnection,
+                                       ssl_context=self.ssl_context,
+                                       **self.client_options)
+        """

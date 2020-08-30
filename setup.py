@@ -52,6 +52,8 @@ install_requires = [
     #   urllib3: MIT
     #   aiohttp: Apache 2.0
     "elasticsearch[async]==7.8.0",
+    "mysqlclient",
+    "aiomysql",
     # License: BSD
     "psutil==5.7.0",
     # License: MIT
