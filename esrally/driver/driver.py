@@ -398,7 +398,7 @@ class Driver:
         if self.es_client_factory != client.EsClientFactory:
             self.telemetry = telemetry.Telemetry(enabled_devices, devices=[
                 telemetry.NodeStats(telemetry_params, es, self.metrics_store),
-                telemetry.IndexStats(es_default, self.metrics_store),
+                # telemetry.IndexStats(es_default, self.metrics_store),     # 暂时支持读取索引的统计信息
                 telemetry.CcrStats(telemetry_params, es, self.metrics_store),
                 telemetry.RecoveryStats(telemetry_params, es, self.metrics_store),
                 telemetry.TransformStats(telemetry_params, es, self.metrics_store)

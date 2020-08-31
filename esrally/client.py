@@ -223,6 +223,71 @@ def wait_for_rest_layer(es, max_attempts=40):
                 raise e
     return False
 
+"""
+    为兼容 ES API 接口， 实现的 LazyLoad 对象
+"""
+import functools
+
+def async_context():
+    def wrapper(func):
+        @functools.wraps(func)
+        async def wrapped(*args, **kwargs):
+            # print (args[0].url)
+            # Some fancy foo stuff
+            meta = args[0]._mc_conn.ctx
+            if "request_start" not in meta:
+                meta["request_start"] = time.perf_counter()
+            v = await func(*args, **kwargs)
+            meta["request_end"] = time.perf_counter()
+            return v
+
+        return wrapped
+    return wrapper
+
+
+class LazyManticoreIndices(object):
+    def __init__(self, conn):
+        self._mc_conn = conn
+        self.indices = []
+
+    async def _fetch_index(self):
+        """
+        查询 manticore 中包括的 索引
+        """
+        indices = []
+        conn = self._mc_conn.conn
+        cursor = conn.cursor()
+        try:
+            rs = cursor.execute("SHOW TABLES")
+            for row in cursor.fetchall():
+                # index name, type
+                indices.append(row[0])
+        finally:
+            cursor.close()
+        return indices
+
+    @async_context()
+    async def exists(self, index):
+        # check have cache?
+        if not self.indices:
+            self.indices = await self._fetch_index()
+        # print(self._mc_conn.ctx)
+        return index in self.indices
+    
+    @async_context()
+    async def create(self, index, body, params):
+        print(index, body, params)
+        raise NotImplementedError
+
+
+class ManticoreTransport:
+    def __init__(self, mc):
+        self._mc = mc
+
+    async def close(self):
+        self._mc.conn.close()
+
+
 class ManticoreClientFactory:
     """
     Abstracts how the Manticore client is created. Intended for testing.
@@ -263,7 +328,31 @@ class ManticoreClientFactory:
         #conn = await aiomysql.connect(host=self.hosts[0], loop= asyncio.get_running_loop())
         #return conn
         host = self.hosts[0]['host']
-        return MySQLdb.connect(host=host, port=9306)
+
+        class RallyManticoreConnection(object):
+
+            def __init__(self, host, port):
+                self.conn = MySQLdb.connect(host=host, port=port)
+                self.ctx = {}
+                
+                # init properties
+                self.indices = LazyManticoreIndices(self)
+                self.transport = ManticoreTransport(self)
+            
+            def init_request_context(self):
+                self.ctx = {}
+                # 暂时处理为同步
+                # RallyAsyncElasticsearch.request_context.set(ctx)
+                return self.ctx
+
+            def return_raw_response(self):
+                # ctx = RallyAsyncElasticsearch.request_context.get()
+                self.ctx["raw_response"] = True
+            
+            #def close(self):
+            #    self.conn.close()
+
+        return RallyManticoreConnection(host=host, port=9306)
 
         """
         import elasticsearch
