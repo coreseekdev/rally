@@ -492,6 +492,18 @@ class ManticoreClientFactory:
             @async_context2()
             async def bulk(self, body, params):
                 print(body, params)
+                """
+                '{"index": {"_index": "logs-181998"}}\n
+                {"@timestamp": 893964617, "clientip":"40.135.0.0", "request": "GET /images/hm_bg.jpg HTTP/1.0", "status": 200, "size": 24736}\n
+                {"index": {"_index": "logs-181998"}}\n
+                {"@timestamp": 893964653, "clientip":"232.0.0.0", "request": "GET /images/hm_bg.jpg HTTP/1.0", "status": 200, "size": 24736}\n
+                {"index": {"_index": "logs-181998"}}\n{"@timestamp": 893964672, "clientip":"26.1.0.0", "request": "GET /images/hm_bg.jpg HTTP/1.0", "status": 200, "size": 24736}\n
+                {"index": {"_index": "logs-181998"}}\n{"@timestamp": 893964679, "clientip":"247.37.0.0", "request": "GET /french/splash_inet.html HTTP/1.0", "status": 200, "size": 3781}\n
+                {"index": {"_index": "logs-181998"}}\n{"@timestamp": 893964682, "clientip":"247.37.0.0", "request": "GET /images/hm_nbg.jpg HTTP/1.0", "status": 304, "size": 0}\n{"index": {"_index": "logs-181998"}}\n{"@timestamp": 893964687, "clientip":"252.0.0.0", "request": "GET /images/hm_bg.jpg HTTP/1.0", "status": 200, "size": 24736}\n{"index": {"_index": "logs-181998"}}\n{"@timestamp": 893964689, "clientip":"247.37.0.0", "request": "GET /images/hm_brdl.gif HTTP/1.0", "status": 304, "size": 0}\n{"index": {"_index": "logs-181998"}}\n{"@timestamp": 893964689, "clientip":"247.37.0.0", "request": "GET /images/hm_arw.gif HTTP/1.0", "status": 304, "size": 0}\n{"index": {"_index": "logs-181998"}}\n{"@timestamp": 893964692, "clientip":"247.37.0.0", "request": "GET /images/nav_bg_top.gif HTTP/1.0", "status"
+                """
+                """
+                1. Needs reform the whole body.
+                """
                 raise NotImplemented
 
 
