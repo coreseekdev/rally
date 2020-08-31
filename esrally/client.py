@@ -244,6 +244,27 @@ def async_context():
         return wrapped
     return wrapper
 
+def async_context2():
+    def wrapper(func):
+        @functools.wraps(func)
+        async def wrapped(*args, **kwargs):
+            # print (args[0].url)
+            # Some fancy foo stuff
+            meta = args[0].ctx
+            if "request_start" not in meta:
+                meta["request_start"] = time.perf_counter()
+            v = await func(*args, **kwargs)
+            meta["request_end"] = time.perf_counter()
+            return v
+
+        return wrapped
+    return wrapper
+
+def toManticoreIndexName(esIndex):
+    return esIndex.replace('-', '_')
+
+def toManticoreFieldName(esFieldName):
+    return esFieldName.replace('@', '_')
 
 class LazyManticoreIndices(object):
     def __init__(self, conn):
@@ -273,20 +294,138 @@ class LazyManticoreIndices(object):
             self.indices = await self._fetch_index()
         # print(self._mc_conn.ctx)
         return index in self.indices
-    
+
+    @async_context()
+    async def delete(self, index, params=None):
+        conn = self._mc_conn.conn
+        cursor = conn.cursor()
+        try:
+            rs = cursor.execute("DROP TABLE {}".format(toManticoreIndexName(index)))
+        finally:
+            cursor.close()
+        return True
+  
     @async_context()
     async def create(self, index, body, params):
-        print(index, body, params)
-        raise NotImplementedError
+        # {'settings': 
+        #   {'index.number_of_shards': 5, 
+        #    'index.number_of_replicas': 0, 
+        #    'index.requests.cache.enable': False, 
+        #    'index.sort.field': '@timestamp', 'index.sort.order': 'desc'}
+        # CREATE TABLE distributed_index type='distributed' local='local_index'
+        """
+        'mappings': {
+            'dynamic': 'strict', 
+            '_source': {'enabled': True}, 
+            'properties': {
+                '@timestamp': {'format': 'strict_date_optional_time||epoch_second', 'type': 'date'}, 
+                'clientip': {'type': 'ip'}, 
+                'message': {'type': 'keyword', 'index': False, 'doc_values': False}, 
+                'request': {'type': 'text', 'fields': {'raw': {'ignore_above': 256, 'type': 'keyword'}}}, 
+                'status': {'type': 'integer'}, 'size': {'type': 'integer'}, 
+                'geoip': {
+                    'properties': {
+                        'country_name': {'type': 'keyword'}, 
+                        'city_name': {'type': 'keyword'}, 
+                        'location': {'type': 'geo_point'}
+                    }
+                }
+            }
+        }} {}
+
+        strict_date_optional_time||epoch_second
+            允许字符串解析， 标准时间格式 或 milliseconds-since-the-epoch.
+        ip
+            支持 ipv4 或 ipv6 的字符串形式进入索引,
+            ip 可以使用 CIDR 进行查询，或进行精确查询
+            ip 可以视为 需要进行特殊处理的全文检索字段
+        keyword
+            处理为 string
+        embed-type
+            展开子 字段
+        允许在 字段中，在索引时衍生字段，eg. raw
+        integer
+            int32
+        geo_point   , 添加额外的字段 -lat 和 -lon
+            "location": { 
+                "lat": 41.12,
+                "lon": -71.34
+            }   
+        """
+        def toManticoreType(esType):
+            es2manticore_mappting = {
+                'date': 'timestamp',
+                'ip':   'text',
+                'keyword': 'string',
+                'text': 'text',
+                'integer': 'int'
+            }
+            if esType.lower() in es2manticore_mappting:
+                return es2manticore_mappting[esType.lower()]
+            return None
+        
+        def addAttribute(attr):
+            if attr.get('indexed', False):
+                return " attribute indexed"
+            return ""
+
+        index_name = index
+        number_of_shards = body['settings']['index.number_of_shards']
+        # field_name, type, options{}
+        # eg. attribute indexed 
+        fields_define = []
+        for field, props in body['mappings']['properties'].items():
+            if 'properties' in props:
+                # hardcoded hack, skip geoip
+                continue
+
+            mcType = toManticoreType(props['type'])
+            if mcType:
+                attr = dict()
+                # hardcoded hack for http_logs
+                if 'fields' in props:
+                    fields_define.append(
+                        (field, 'string', {'indexed':True})
+                    )
+                else:
+                    fields_define.append(
+                        (field, mcType, attr)
+                    )
+        # create table products(title text stored indexed, content text stored indexed, name text indexed, price float)
+        # CREATE TABLE products (title text indexed, description text stored, author text, price float)
+        fields = map(lambda x: "{} {}".format(toManticoreFieldName(x[0]), x[1] + addAttribute(x[2])) , fields_define)
+        sql = "CREATE TABLE {}({})".format(toManticoreIndexName(index_name), ', '.join(fields))
+        # print(sql)
+        #for field in fields_define:
+        #    print(field)
+        conn = self._mc_conn.conn
+        cursor = conn.cursor()
+        try:
+            rs = cursor.execute(sql)
+        finally:
+            cursor.close()
+        return True
 
 
 class ManticoreTransport:
     def __init__(self, mc):
-        self._mc = mc
+        self._mc_conn = mc
 
+    @async_context()
     async def close(self):
-        self._mc.conn.close()
+        self._mc_conn.conn.close()
 
+class ManticoreCluster:
+    def __init__(self, mc):
+        self._mc_conn = mc
+
+    @async_context()
+    async def health(self, index, params):
+        # hard coded
+        return {
+            "status": 3,    # 3 for green .
+            "relocating_shards": 0
+        }
 
 class ManticoreClientFactory:
     """
@@ -338,6 +477,7 @@ class ManticoreClientFactory:
                 # init properties
                 self.indices = LazyManticoreIndices(self)
                 self.transport = ManticoreTransport(self)
+                self.cluster = ManticoreCluster(self)
             
             def init_request_context(self):
                 self.ctx = {}
@@ -349,8 +489,11 @@ class ManticoreClientFactory:
                 # ctx = RallyAsyncElasticsearch.request_context.get()
                 self.ctx["raw_response"] = True
             
-            #def close(self):
-            #    self.conn.close()
+            @async_context2()
+            async def bulk(self, body, params):
+                print(body, params)
+                raise NotImplemented
+
 
         return RallyManticoreConnection(host=host, port=9306)
 
