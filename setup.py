@@ -54,6 +54,7 @@ install_requires = [
     "elasticsearch[async]==7.8.0",
     "mysqlclient",
     "aiomysql",
+    "ujson",
     # License: BSD
     "psutil==5.7.0",
     # License: MIT

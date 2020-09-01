@@ -709,6 +709,7 @@ def parse(text, props, lists=None):
     :param lists: An optional list of property paths to JSON lists in the provided text.
     :return: A dict containing all properties and lists that have been found in the provided text.
     """
+    # print("sssss", type(text))
     text.seek(0)
     parser = ijson.parse(text)
     parsed = {}

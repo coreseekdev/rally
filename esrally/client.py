@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
+import io
 import contextvars
 import logging
 import time
@@ -244,21 +244,9 @@ def async_context():
         return wrapped
     return wrapper
 
-def async_context2():
-    def wrapper(func):
-        @functools.wraps(func)
-        async def wrapped(*args, **kwargs):
-            # print (args[0].url)
-            # Some fancy foo stuff
-            meta = args[0].ctx
-            if "request_start" not in meta:
-                meta["request_start"] = time.perf_counter()
-            v = await func(*args, **kwargs)
-            meta["request_end"] = time.perf_counter()
-            return v
+# import time
 
-        return wrapped
-    return wrapper
+current_milli_time = lambda: int(round(time.time() * 1000))
 
 def toManticoreIndexName(esIndex):
     return esIndex.replace('-', '_')
@@ -270,6 +258,7 @@ class LazyManticoreIndices(object):
     def __init__(self, conn):
         self._mc_conn = conn
         self.indices = []
+        self.logger = logging.getLogger(__name__)
 
     async def _fetch_index(self):
         """
@@ -293,6 +282,8 @@ class LazyManticoreIndices(object):
         if not self.indices:
             self.indices = await self._fetch_index()
         # print(self._mc_conn.ctx)
+        # 需要调整输入的索引名字
+        index = toManticoreIndexName(index)
         return index in self.indices
 
     @async_context()
@@ -300,7 +291,10 @@ class LazyManticoreIndices(object):
         conn = self._mc_conn.conn
         cursor = conn.cursor()
         try:
-            rs = cursor.execute("DROP TABLE {}".format(toManticoreIndexName(index)))
+            sql = "DROP TABLE {}".format(toManticoreIndexName(index))
+            self.logger.info('EXEC: {}'.format(sql))
+            rs = cursor.execute(sql)
+            conn.commit()
         finally:
             cursor.close()
         return True
@@ -353,15 +347,15 @@ class LazyManticoreIndices(object):
             }   
         """
         def toManticoreType(esType):
-            es2manticore_mappting = {
+            es2manticore_mapping = {
                 'date': 'timestamp',
                 'ip':   'text',
                 'keyword': 'string',
                 'text': 'text',
                 'integer': 'int'
             }
-            if esType.lower() in es2manticore_mappting:
-                return es2manticore_mappting[esType.lower()]
+            if esType.lower() in es2manticore_mapping:
+                return es2manticore_mapping[esType.lower()]
             return None
         
         def addAttribute(attr):
@@ -382,7 +376,7 @@ class LazyManticoreIndices(object):
             mcType = toManticoreType(props['type'])
             if mcType:
                 attr = dict()
-                # hardcoded hack for http_logs
+                # hardcoded hack for http_logstoManticoreIndexName(index_name)
                 if 'fields' in props:
                     fields_define.append(
                         (field, 'string', {'indexed':True})
@@ -395,13 +389,12 @@ class LazyManticoreIndices(object):
         # CREATE TABLE products (title text indexed, description text stored, author text, price float)
         fields = map(lambda x: "{} {}".format(toManticoreFieldName(x[0]), x[1] + addAttribute(x[2])) , fields_define)
         sql = "CREATE TABLE {}({})".format(toManticoreIndexName(index_name), ', '.join(fields))
-        # print(sql)
-        #for field in fields_define:
-        #    print(field)
+        self.logger.info('EXEC: {}'.format(sql))
         conn = self._mc_conn.conn
         cursor = conn.cursor()
         try:
             rs = cursor.execute(sql)
+            conn.commit()
         finally:
             cursor.close()
         return True
@@ -426,6 +419,73 @@ class ManticoreCluster:
             "status": 3,    # 3 for green .
             "relocating_shards": 0
         }
+
+# Bulk insert related.
+import ujson
+
+class DataFeeder:
+    def __init__(self, flush_cb=None, bulksize=5000):
+        self._index_name = None
+        self._items = []
+        self.flush_cb = flush_cb
+        self.bulk_size = bulksize
+    
+    async def feed(self, data):
+        if data:
+            obj = ujson.loads(data)
+            if 'index' in obj:
+                index_name = obj['index']['_index']
+                if index_name != self._index_name:
+                    await self.flush()
+                    self._index_name = index_name
+            else:
+                self._items.append(obj)
+                if len(self._items) >= self.bulk_size:
+                    # flush flush
+                    await self.flush()
+        else:
+            await self.flush()
+    
+    async def flush(self):
+        ret = True
+
+        if self._items:    
+            if self.flush_cb:
+                # do real insert
+                ret = await self.flush_cb(self._index_name, self._items)
+            
+            if ret:
+                self._items = []
+        return ret
+
+class DataFlusher:
+    def __init__(self, mc, conn):
+        self._mc_conn = mc
+        self.conn = conn
+        self.logger = logging.getLogger(__name__)
+    
+    @async_context()
+    async def __call__(self, index_name, items):
+        if len(items):
+            item = items[0]
+            keys = item.keys()
+            fields = map(lambda x: toManticoreFieldName(x), keys)
+            sql = "INSERT INTO {}({}) VALUES ({})".format(toManticoreIndexName(index_name), ", ".join(fields), ", ".join(["%s"]*len(keys)))
+            values = [tuple(x.values()) for x in items]
+            cursor = self.conn.cursor()
+            try:
+                cursor.executemany(sql, values)
+                #Commit your changes
+                self.conn.commit()
+            except Exception as ex:
+                # record all exceptions
+                self.logger.error(ex)
+                raise ex
+            finally:
+                cursor.close()
+            
+            #print(sql, len(items))
+        return True
 
 class ManticoreClientFactory:
     """
@@ -489,9 +549,7 @@ class ManticoreClientFactory:
                 # ctx = RallyAsyncElasticsearch.request_context.get()
                 self.ctx["raw_response"] = True
             
-            @async_context2()
             async def bulk(self, body, params):
-                print(body, params)
                 """
                 '{"index": {"_index": "logs-181998"}}\n
                 {"@timestamp": 893964617, "clientip":"40.135.0.0", "request": "GET /images/hm_bg.jpg HTTP/1.0", "status": 200, "size": 24736}\n
@@ -504,8 +562,17 @@ class ManticoreClientFactory:
                 """
                 1. Needs reform the whole body.
                 """
-                raise NotImplemented
-
+                start_t = current_milli_time()
+                feeder = DataFeeder(DataFlusher(self, self.conn), bulksize=5000)
+                for l in body.split(b'\n'):
+                    await feeder.feed(l)
+                await feeder.flush()  # flush the remains.
+                # FIXME: how to report errors ?
+                bytesIO = io.BytesIO() 
+                bytesIO.write(ujson.dumps({ "index": feeder._index_name,
+                    "took": current_milli_time() - start_t,
+                }).encode("utf-8"))
+                return bytesIO
 
         return RallyManticoreConnection(host=host, port=9306)
 
