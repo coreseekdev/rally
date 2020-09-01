@@ -399,6 +399,73 @@ class LazyManticoreIndices(object):
             cursor.close()
         return True
 
+    @async_context()
+    async def refresh(self, index, params=None):
+        # 在 ES 中， refresh 是将数据刷新到磁盘
+        conn = self._mc_conn.conn
+        cursor = conn.cursor()
+        try:
+            if index != '_all':
+                sql = "FLUSH RTINDEX {}".format(toManticoreIndexName(index))
+                self.logger.info('EXEC: {}'.format(sql))
+                rs = cursor.execute(sql)
+            else:
+                if not self.indices:
+                    self.indices = await self._fetch_index()
+                for idx in self.indices:
+                    sql = "FLUSH RTINDEX {}".format(idx)
+                    self.logger.info('EXEC: {}'.format(sql))
+                    rs = cursor.execute(sql)
+
+            conn.commit()
+        finally:
+            cursor.close()
+        return True
+
+    @async_context()
+    async def forcemerge(self, index, max_num_segments=1, request_timeout=10):
+        # 优化到特定的 segments 数， 在此无视之 均优化到 1
+        conn = self._mc_conn.conn
+        cursor = conn.cursor()
+        try:
+            # logs_181998,logs_191998,logs_201998,logs_211998,logs_221998,logs_231998,logs_241998,reindexed_logs
+            for idx in index.split(','):
+                sql = "OPTIMIZE INDEX {}".format(toManticoreIndexName(idx))
+                self.logger.info('EXEC: {}'.format(sql))
+                rs = cursor.execute(sql)
+                conn.commit()
+        finally:
+            cursor.close()
+        return True
+
+    @async_context()
+    async def stats(self, index, metric="_all"):
+        conn = self._mc_conn.conn
+        cursor = conn.cursor()
+        if index == "_all":
+            if not self.indices:
+                self.indices = await self._fetch_index()
+            index = ",".join(self.indices)
+        try:
+            # logs_181998,logs_191998,logs_201998,logs_211998,logs_221998,logs_231998,logs_241998,reindexed_logs
+            # ES 同时可以输入多个索引， 但是 Manticore 无法同时查询。把状态查询请求都发出，保证时间消耗
+            for idx in index.split(','):
+                sql = "SHOW INDEX {} STATUS".format(toManticoreIndexName(idx))
+                self.logger.info('EXEC: {}'.format(sql))
+                rs = cursor.execute(sql)
+                for row in cursor.fetchall():
+                    # index name, type
+                    pass
+        finally:
+            cursor.close()
+        # fake result. stats metrics totally different
+        return {
+            '_all': {
+                'total': {
+                    'merges': { 'current': 0}
+                }
+            }
+        }
 
 class ManticoreTransport:
     def __init__(self, mc):
@@ -416,7 +483,7 @@ class ManticoreCluster:
     async def health(self, index, params):
         # hard coded
         return {
-            "status": 3,    # 3 for green .
+            "status": 'green',    # 3 for green .
             "relocating_shards": 0
         }
 
@@ -563,7 +630,7 @@ class ManticoreClientFactory:
                 1. Needs reform the whole body.
                 """
                 start_t = current_milli_time()
-                feeder = DataFeeder(DataFlusher(self, self.conn), bulksize=5000)
+                feeder = DataFeeder(DataFlusher(self, self.conn), bulksize=10000)
                 for l in body.split(b'\n'):
                     await feeder.feed(l)
                 await feeder.flush()  # flush the remains.
