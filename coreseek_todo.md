@@ -170,3 +170,112 @@ sys	0m0.232s
 - Min Throughput 88045.4 vs 43979.1 为 ES 的 200%
 - 90%请求时延 2539.37ms vs 2934.07ms 为 ES 的 86.5%
 - 事物性写入，不存在部分写入成功的情况
+
+
+
+## ES on 33G
+
+            
+|                                                         Metric |                      Task |       Value |   Unit |
+|---------------------------------------------------------------:|--------------------------:|------------:|-------:|
+|                     Cumulative indexing time of primary shards |                           |     272.637 |    min |
+|             Min cumulative indexing time across primary shards |                           |           0 |    min |
+|          Median cumulative indexing time across primary shards |                           |     2.86537 |    min |
+|             Max cumulative indexing time across primary shards |                           |     46.4525 |    min |
+|            Cumulative indexing throttle time of primary shards |                           |           0 |    min |
+|    Min cumulative indexing throttle time across primary shards |                           |           0 |    min |
+| Median cumulative indexing throttle time across primary shards |                           |           0 |    min |
+|    Max cumulative indexing throttle time across primary shards |                           |           0 |    min |
+|                        Cumulative merge time of primary shards |                           |     147.056 |    min |
+|                       Cumulative merge count of primary shards |                           |         420 |        |
+|                Min cumulative merge time across primary shards |                           |           0 |    min |
+|             Median cumulative merge time across primary shards |                           |      0.7051 |    min |
+|                Max cumulative merge time across primary shards |                           |     31.8299 |    min |
+|               Cumulative merge throttle time of primary shards |                           |     38.4837 |    min |
+|       Min cumulative merge throttle time across primary shards |                           |           0 |    min |
+|    Median cumulative merge throttle time across primary shards |                           |           0 |    min |
+|       Max cumulative merge throttle time across primary shards |                           |     10.1029 |    min |
+|                      Cumulative refresh time of primary shards |                           |     48.4984 |    min |
+|                     Cumulative refresh count of primary shards |                           |        1705 |        |
+|              Min cumulative refresh time across primary shards |                           |           0 |    min |
+|           Median cumulative refresh time across primary shards |                           |      0.5977 |    min |
+|              Max cumulative refresh time across primary shards |                           |     7.78722 |    min |
+|                        Cumulative flush time of primary shards |                           |     3.65092 |    min |
+|                       Cumulative flush count of primary shards |                           |         122 |        |
+|                Min cumulative flush time across primary shards |                           |           0 |    min |
+|             Median cumulative flush time across primary shards |                           |   0.0216333 |    min |
+|                Max cumulative flush time across primary shards |                           |    0.802217 |    min |
+|                                        Total Young Gen GC time |                           |     121.524 |      s |
+|                                       Total Young Gen GC count |                           |       13867 |        |
+|                                          Total Old Gen GC time |                           |      17.922 |      s |
+|                                         Total Old Gen GC count |                           |         378 |        |
+|                                                     Store size |                           |     15.8295 |     GB |
+|                                                  Translog size |                           | 1.99769e-06 |     GB |
+|                                         Heap used for segments |                           |    0.893215 |     MB |
+|                                       Heap used for doc values |                           |    0.116703 |     MB |
+|                                            Heap used for terms |                           |    0.360077 |     MB |
+|                                            Heap used for norms |                           |    0.031311 |     MB |
+|                                           Heap used for points |                           |           0 |     MB |
+|                                    Heap used for stored fields |                           |    0.385124 |     MB |
+|                                                  Segment count |                           |         513 |        |
+|                                                 Min Throughput |              index-append |     15700.9 | docs/s |
+|                                              Median Throughput |              index-append |     69682.1 | docs/s |
+|                                                 Max Throughput |              index-append |     82966.9 | docs/s |
+|                                        50th percentile latency |              index-append |     290.841 |     ms |
+|                                        90th percentile latency |              index-append |     10936.4 |     ms |
+|                                        99th percentile latency |              index-append |       10968 |     ms |
+|                                      99.9th percentile latency |              index-append |     10978.9 |     ms |
+|                                     99.99th percentile latency |              index-append |     10980.5 |     ms |
+|                                       100th percentile latency |              index-append |     10984.3 |     ms |
+|                                   50th percentile service time |              index-append |     290.841 |     ms |
+|                                   90th percentile service time |              index-append |     10936.4 |     ms |
+|                                   99th percentile service time |              index-append |       10968 |     ms |
+|                                 99.9th percentile service time |              index-append |     10978.9 |     ms |
+|                                99.99th percentile service time |              index-append |     10980.5 |     ms |
+|                                  100th percentile service time |              index-append |     10984.3 |     ms |
+|                                                     error rate |              index-append |       14.12 |      % |
+|                                       100th percentile latency |       refresh-after-index |     10872.1 |     ms |
+|                                  100th percentile service time |       refresh-after-index |     10872.1 |     ms |
+|                                                     error rate |       refresh-after-index |         100 |      % |
+|                                       100th percentile latency | refresh-after-force-merge |     10826.2 |     ms |
+|                                  100th percentile service time | refresh-after-force-merge |     10826.2 |     ms |
+|                                                     error rate | refresh-after-force-merge |         100 |      % |
+
+[WARNING] Error rate is 14.12 for operation 'index-append'. Please check the logs.
+[WARNING] Error rate is 100.0 for operation 'refresh-after-index'. Please check the logs.
+[WARNING] No throughput metrics available for [refresh-after-index]. Likely cause: Error rate is 100.0%. Please check the logs.
+[WARNING] Error rate is 100.0 for operation 'refresh-after-force-merge'. Please check the logs.
+[WARNING] No throughput metrics available for [refresh-after-force-merge]. Likely cause: Error rate is 100.0%. Please check the logs.
+
+-----------------------------------
+[INFO] SUCCESS (took 13619 seconds)
+-----------------------------------
+
+
+
+## MC on 33G
+
+            
+|                          Metric |         Task |   Value |   Unit |
+|--------------------------------:|-------------:|--------:|-------:|
+|                  Min Throughput | index-append | 71908.7 | docs/s |
+|               Median Throughput | index-append | 74028.2 | docs/s |
+|                  Max Throughput | index-append | 98620.8 | docs/s |
+|         50th percentile latency | index-append | 392.989 |     ms |
+|         90th percentile latency | index-append | 520.343 |     ms |
+|         99th percentile latency | index-append | 2059.77 |     ms |
+|       99.9th percentile latency | index-append | 2979.19 |     ms |
+|      99.99th percentile latency | index-append | 3589.06 |     ms |
+|        100th percentile latency | index-append |  3952.6 |     ms |
+|    50th percentile service time | index-append | 392.989 |     ms |
+|    90th percentile service time | index-append | 520.343 |     ms |
+|    99th percentile service time | index-append | 2059.77 |     ms |
+|  99.9th percentile service time | index-append | 2979.19 |     ms |
+| 99.99th percentile service time | index-append | 3589.06 |     ms |
+|   100th percentile service time | index-append |  3952.6 |     ms |
+|                      error rate | index-append |       0 |      % |
+
+
+----------------------------------
+[INFO] SUCCESS (took 3340 seconds)
+----------------------------------
